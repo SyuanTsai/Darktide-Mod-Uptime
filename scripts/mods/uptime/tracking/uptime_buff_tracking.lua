@@ -38,7 +38,7 @@ local TalentSettings = mod:original_require("scripts/settings/talent/talent_sett
     - Supporting future analytics on buff timing and patterns
 ]]
 
-mod.tracked_buffs = {}
+local tracked_buffs = {}
 
 local displayed_buff_categories = {
     talents = true,
@@ -47,12 +47,12 @@ local displayed_buff_categories = {
 }
 
 function mod:start_buff_tracking()
-    mod.tracked_buffs = {}
+    tracked_buffs = {}
 end
 
-function mod:end_buff_tracking()
-    mod:finalize_tracking(mod.mission_tracking.end_time)
-    return mod.tracked_buffs
+function mod:end_buff_tracking(end_time)
+    finalize_buff_tracking(end_time)
+    return tracked_buffs
 end
 
 mod:hook_safe("HudElementPlayerBuffs", "_update_buffs", function(self)
@@ -60,11 +60,16 @@ mod:hook_safe("HudElementPlayerBuffs", "_update_buffs", function(self)
         return
     end
 
+    -- This is to filter out custom buff bars, e.g. from "Better Buff Management"
+    if self.__class_name ~= "HudElementPlayerBuffs" or self._filter then
+        return
+    end
+
     local active_buffs_data = self._active_buffs_data
     local now = mod:now()
 
-    local currently_active_buffs = update_active_buffs(mod.tracked_buffs, active_buffs_data, now)
-    update_removed_buffs(mod.tracked_buffs, currently_active_buffs, now)
+    local currently_active_buffs = update_active_buffs(tracked_buffs, active_buffs_data, now)
+    update_removed_buffs(tracked_buffs, currently_active_buffs, now)
 end)
 
 function update_active_buffs(tracked_buffs, active_buffs_data, now)
@@ -93,8 +98,8 @@ function update_removed_buffs(tracked_buffs, currently_active_buffs, now)
         if buff_data.is_active and not currently_active_buffs[buff_title] then
             -- Record a remove event
             table.insert(buff_data.events, {
+                time = now,
                 type = "remove",
-                time = now
             })
 
             -- Mark the buff as inactive
@@ -110,7 +115,7 @@ function ignore_buff(buff_data)
 
     local buff_category = buff_template.buff_category
     local wrong_category = not displayed_buff_categories[buff_category]
-    local no_stacks = buff_instance:stat_buff_stacking_count() == 0
+    local no_stacks = buff_instance:visual_stack_count() == 0
     local is_debuff = buff_instance:is_negative()
     local not_shown = not buff_data.show
     local not_active = not hud_data.is_active
@@ -174,7 +179,6 @@ function init_buff(buff_instance)
         category = template.buff_category,
         related_talents = template.related_talents,
         related_item = get_optional_item_info(buff_instance),
-        instance = buff_instance
     }
 end
 
@@ -198,8 +202,8 @@ function get_actual_max(buff_instance)
     local child_buff_template = template.child_buff_template
     local child_template = BuffTemplates[child_buff_template]
     if child_template then
-        -- https://github.com/Aussiemon/Darktide-Source-Code/blob/72cde1c088677d22b3830d9681d015167782b10a/scripts/extension_systems/buff/buffs/parent_proc_buff.lua#L15
-        return (buff_instance._template_override_data.max_stacks or child_template.max_stacks or 1 or 1)
+        -- https://github.com/Aussiemon/Darktide-Source-Code/blob/72cde1c088677d22b3830d9681d015167782b10a/scripts/extension_systems/buff/buffs/parent_proc_buff.lua#L30
+        return (buff_instance._template_override_data.max_stacks or child_template.max_stacks or 1)
     end
 
     return buff_instance:max_stacks() or 1
@@ -208,13 +212,9 @@ end
 function get_optional_item_info(buff_instance)
     local context = (buff_instance._template_context or {})
     local item = context.source_item or context.item
-    if not item then
-        mod.buffs_without_item = mod.buffs_without_item or {}
-        mod.buffs_without_item[#mod.buffs_without_item + 1] = buff_instance
+    if not item or not item.traits then
         return nil
     end
-    mod.buffs_with_item = mod.buffs_with_item or {}
-    mod.buffs_with_item[#mod.buffs_with_item + 1] = buff_instance
     local blessing
     for _, trait in pairs(item.traits) do
         local trait_item = MasterItems.get_item(trait.id)
@@ -246,8 +246,8 @@ function trait_belongs_to_buff(trait_definition, buff_title)
     return false
 end
 
-function mod:finalize_tracking(tracking_end_time)
-    for buff_name, buff_data in pairs(mod.tracked_buffs) do
+function finalize_buff_tracking(tracking_end_time)
+    for buff_name, buff_data in pairs(tracked_buffs) do
         -- If the buff is still active at the end of tracking, add a remove event
         if buff_data.is_active then
             table.insert(buff_data.events, {
