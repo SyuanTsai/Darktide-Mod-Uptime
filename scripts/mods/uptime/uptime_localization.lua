@@ -24,7 +24,7 @@ return {
     mod_description = {
         en = "Tracks uptime of buffs.",
         ["zh-cn"] = "追踪增益效果的持续时间",
-        ["zh-tw"] = "追蹤增益效果的持續時間"
+        ["zh-tw"] = ,
     },
     loc_uptime_header = {
         en = "uptime",
